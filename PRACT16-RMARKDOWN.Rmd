@@ -1,0 +1,145 @@
+---
+title: "PR16"
+author: "Daniela Escudero"
+date: "2026-05-05"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introducción
+
+Cuando tenemos una variable con **dos categorías de respuesta (binaria)**, existe la posibilidad de codificarla como *dummy*, donde:
+
+- **0** = no hacer / que no pase algo
+- **1** = hacer / que pase algo
+
+Por ejemplo, el valor **0** podría ser *suspender* el examen de matemáticas y **1** *aprobar* dicho examen.
+
+En lugar de estimar la respuesta directamente, la **regresión logística** modela la **probabilidad** de que Y pertenezca a una determinada categoría:
+
+$$\log\left(\frac{p}{1-p}\right) = \beta_0 + \beta_1 X_1 + \beta_2 X_2 + \ldots + \beta_k X_k$$
+
+# Carga de librerías y datos
+
+```{r librerias}
+paquetes <- c("haven", "tidyverse")
+nuevos <- paquetes[!(paquetes %in% installed.packages()[,"Package"])]
+if (length(nuevos)) install.packages(nuevos, repos = "https://cloud.r-project.org")
+
+library(haven)
+library(tidyverse)
+```
+
+```{r carga-datos}
+pisa <- read_sav("/Users/daniescu/Desktop/USAL/UNIVERSIDAD/CLASE/SOCIOLOGÍA/CUARTO/SEGUNDO CUATRI/DATA SCIENCE/PRACTICA 16/PISA22SP.sav")
+
+names(pisa) <- tolower(names(pisa))
+
+pisa <- pisa %>%
+  mutate(
+    mates  = as.numeric(mates),
+    lectu  = as.numeric(lectu),
+    heduc  = as.numeric(heduc),
+    genero = as_factor(genero)
+  ) %>%
+  filter(genero %in% c("Female", "Male")) %>%   # conservar solo categorías válidas
+  mutate(genero = droplevels(genero))            # eliminar niveles vacíos sobrantes
+```
+
+# Preparación de los datos
+
+```{r summary-mates}
+summary(pisa$mates)
+```
+
+```{r recodificacion}
+# Calcular el tercer cuartil (3rd Qu.)
+tercer_cuartil <- quantile(pisa$mates, 0.75)
+
+# Recodificar la variable
+pisa$mates_r <- ifelse(pisa$mates > tercer_cuartil, 1, 0)
+levels(pisa$mates_r) <- c("Normales", "Buenos")
+summary(pisa$mates_r)
+```
+
+# Modelo logístico simple
+
+```{r logit-simple}
+logit <- glm(mates_r ~ lectu, binomial, pisa)
+summary(logit)
+```
+
+```{r or-simple}
+exp(coef(logit))
+exp(confint(logit))
+```
+
+# Modelo logístico múltiple
+
+```{r logit-multiple}
+logit2 <- glm(mates_r ~ genero + heduc + lectu, binomial, pisa)
+summary(logit2)
+```
+
+```{r or-multiple}
+exp(coef(logit2))
+exp(confint(logit2))
+```
+
+El **coeficiente logit** ($b_k$) indica cuánto aumenta el logit cuando la variable $k$ varía en una unidad, manteniendo constante el resto. En el caso de $b_0$, el coeficiente es el logit correspondiente al caso con cero en todas las variables independientes. El logit puede transformarse en una **razón** ($\theta$) o **cociente de razones** ($\omega_k$) hallando su antilogaritmo ($e^{b_k}$).
+
+# Probabilidades predichas
+
+## Modelo simple
+
+```{r curva-simple}
+rango_lectu <- data.frame(
+  lectu = seq(min(pisa$lectu, na.rm = TRUE),
+              max(pisa$lectu, na.rm = TRUE),
+              length.out = 300)
+)
+rango_lectu$prob <- predict(logit, newdata = rango_lectu, type = "response")
+
+ggplot(rango_lectu, aes(x = lectu, y = prob)) +
+  geom_line(color = "#2980b9", size = 1.3) +
+  geom_hline(yintercept = 0.25, linetype = "dashed", color = "gray50") +
+  labs(
+    title    = "Probabilidad predicha de obtener buenas notas en Matemáticas",
+    subtitle = "Modelo simple — predictor: puntuación en Lectura",
+    x        = "Puntuación en Lectura",
+    y        = "P(mates_r = 1)"
+  ) +
+  ylim(0, 1) +
+  theme_minimal(base_size = 13)
+```
+
+## Modelo múltiple
+
+```{r curva-genero}
+grid <- expand.grid(
+  lectu  = seq(min(pisa$lectu, na.rm = TRUE),
+               max(pisa$lectu, na.rm = TRUE), length.out = 200),
+  genero = levels(pisa$genero),
+  heduc  = mean(pisa$heduc, na.rm = TRUE)
+) %>%
+  mutate(genero = factor(genero, levels = levels(pisa$genero)))
+
+grid$prob <- predict(logit2, newdata = grid, type = "response")
+
+ggplot(grid, aes(x = lectu, y = prob, color = genero, linetype = genero)) +
+  geom_line(size = 1.2) +
+  scale_color_manual(values = c("#9b59b6", "#3498db")) +
+  labs(
+    title    = "Probabilidad predicha — Modelo múltiple",
+    subtitle = "Género + Educación del padre + Puntuación en Lectura",
+    x        = "Puntuación en Lectura",
+    y        = "P(mates_r = 1)",
+    color    = "Género",
+    linetype = "Género"
+  ) +
+  ylim(0, 1) +
+  theme_minimal(base_size = 13)
+```
